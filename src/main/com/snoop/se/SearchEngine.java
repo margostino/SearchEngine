@@ -17,16 +17,13 @@ import org.apache.olingo.odata2.core.ep.entry.ODataEntryImpl;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequest;
 import org.elasticsearch.action.admin.indices.exists.types.TypesExistsRequest;
-import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetRequestBuilder;
 import org.elasticsearch.action.get.GetResponse;
+import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.TransportClient;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.ImmutableSettings.Builder;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
@@ -85,17 +82,10 @@ public class SearchEngine {
 	}	
 
     public void startupES(){
-    	// on startup
-    	
+    	// on startup    	
     	//node = nodeBuilder().node();    
-    	//client = node.client();
-    	
-    	
+    	//client = node.client();    	  
     	client = new TransportClient().addTransportAddress(new InetSocketTransportAddress("localhost", 9300)); 
-    	
-    	existsIndex("cars");
-    	existsType("cars", "driver");
-    	existsDocument("amovies", "movie", "1");
     }
     
     public void shutdownES(){
@@ -142,6 +132,16 @@ public class SearchEngine {
 		}
 		return result;		
 	}
+	
+	/*public boolean addDocument(String index, String type, String id){
+		boolean result = false;
+		if (existsIndex(index) && existsType(index, type)){
+			GetRequestBuilder getRequestBuilder = client.prepareGet(index, type, id);			
+			GetResponse response = getRequestBuilder.execute().actionGet();
+			result = response.isExists();
+		}
+		return result;		
+	}*/
 	
 	public boolean searchIDOnBoth(String indexName, String documentType, String documentId){
 		boolean result = false;
@@ -222,28 +222,56 @@ public class SearchEngine {
     	return result;
     }    
 
-	public static void createIndex(String indexName, String documentType, String documentId, String fieldName, String value) throws Exception{
+	public void createIndex(String indexName, String documentType, String documentId, String fieldName, String value) throws Exception{
 		createMapping(indexName, documentType);
-		addDocuments(indexName, documentType, documentId, fieldName, value);    	
+		addDocument(indexName, documentType, documentId, fieldName, value);    	
 	}	
+	
+	public boolean addIndex(String indexName){		
+		CreateIndexRequestBuilder createIndexRequestBuilder = client.admin().indices().prepareCreate(indexName);
+		// MAPPING DONE
+		return createIndexRequestBuilder.execute().actionGet().isAcknowledged();
+	}
+	
+	/*public boolean addTypeToIndex(String indexName, String typeName){
+		if (existsIndex(indexName))			
+			XContentBuilder mappingBuilder = jsonBuilder().startObject().startObject(typeName);
 
-	public static void addDocuments(String indexName, String documentType, String documentId, String fieldName, String value) throws Exception{
+		IndexRequest request = new IndexRequest();
+		request.p
+		GetRequestBuilder getRequestBuilder = client.index(request) .prepareGet(indexName);
+		// MAPPING DONE
+		return createIndexRequestBuilder.execute().actionGet().isAcknowledged();
+	}*/
+	
+	public boolean addDocument(String indexName, String documentType, String documentId, String fieldName, String value) throws Exception{
+		boolean result = false;
+		if (!existsDocument(indexName, documentType, documentId)){
+			// Add documents
+			IndexRequestBuilder indexRequestBuilder = client.prepareIndex(indexName, documentType, documentId);
+			// build json object
+			XContentBuilder contentBuilder = jsonBuilder().startObject().prettyPrint();
+			
+			if (fieldName!= null && value!=null)
+				contentBuilder.field(fieldName, value);
 
-		// Add documents
-		final IndexRequestBuilder indexRequestBuilder = client.prepareIndex(indexName, documentType, documentId);
-		// build json object
-		final XContentBuilder contentBuilder = jsonBuilder().startObject().prettyPrint();
-		contentBuilder.field(fieldName, value);
-
-		indexRequestBuilder.setSource(contentBuilder);
-		indexRequestBuilder.execute().actionGet();
+			indexRequestBuilder.setSource(contentBuilder);
+			result = indexRequestBuilder.execute().actionGet().isCreated();
+		}
+		
+		return result;
+	}
+	
+	public boolean addDocument(String indexName, String documentType, String documentId) throws Exception{
+		return addDocument(indexName, documentType, documentId, null, null);
+		
 	}
 
 	public static void createMapping(String indexName, String documentType) throws Exception{
 		// MAPPING GOES HERE
-		final CreateIndexRequestBuilder createIndexRequestBuilder = client.admin().indices().prepareCreate(indexName);
+		CreateIndexRequestBuilder createIndexRequestBuilder = client.admin().indices().prepareCreate(indexName);
 			
-		final XContentBuilder mappingBuilder = jsonBuilder().startObject().startObject(documentType)
+		XContentBuilder mappingBuilder = jsonBuilder().startObject().startObject(documentType)
 				.startObject("_ttl").field("enabled", "true").field("default", "1s").endObject().endObject()
 				.endObject();
 		
@@ -255,12 +283,13 @@ public class SearchEngine {
 	}
 
     protected static String getValue(final Client client, final String indexName, final String documentType,
-            final String documentId, final String fieldName) {
-            final GetRequestBuilder getRequestBuilder = client.prepareGet(indexName, documentType, documentId);
-            getRequestBuilder.setFields(new String[] { fieldName });
-            final GetResponse response2 = getRequestBuilder.execute().actionGet();
+            String documentId, final String fieldName) {
+            GetRequestBuilder getRequestBuilder = client.prepareGet(indexName, documentType, documentId);
+            getRequestBuilder.setFields(new String[] { fieldName });            
+            GetResponse response2 = getRequestBuilder.execute().actionGet();
+            
             if (response2.isExists()) {
-                final String name = response2.getFields().get(fieldName).getValue().toString();
+                String name = response2.getFields().get(fieldName).getValue().toString();
                 return name;
             } else {
                 return ID_NOT_FOUND;
